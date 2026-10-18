@@ -5,11 +5,11 @@ const path = require('node:path');
 const config = require('./config.json');
 const {episodeSources, status:sourceStatus} = require('./sources');
 const {loadRemoteSources,providerStatus,loadLocalEpisodeFeed} = require('./providers');
+const {mergeSources,diagnose} = require('./stream-merge');
+const {SERIES_ID,TMDB_SERIES_ID,LEGACY_SERIES_ID,seriesId,episodeId,videoId} = require('./ids');
 const episodeLinks = require('./episode-watch-links.json');
 const { getEpisodes } = require('./metadata');
 const PORT = Number(process.env.PORT) || 7000;
-const SERIES_ID = 'tt2185037'; // Official IMDb series identifier, shared across compatible metadata/stream addons.
-const LEGACY_SERIES_ID = 'rmhd:runningman'; // Keep v1.7 bookmarks working.
 const SAMPLE_ID = 'rmhd:sample';
 const SAMPLE_VIDEO_ID = 'rmhd:sample:1';
 // Creative Commons Attribution 3.0: Blender Foundation (2008), Big Buck Bunny.
@@ -27,7 +27,7 @@ const SAMPLE = {
 const SERIES_URL = config.goplaySeriesPage;
 const isHttps = value => { try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password; } catch { return false; } };
 const html = value => String(value ?? '').replace(/[&<>"']/g, v => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[v]));
-const epNumber = value => { const match = /^rmhd:ep:(\d{1,4})$/.exec(value); return match ? Number(match[1]) : null; };
+const epNumber = episodeId; // Preserve the old exported function name.
 const customWatch = (number) => {
   const link = episodeLinks[String(number)];
   return (isHttps(link) && /^https:\/\/goplay\.su\//i.test(link)) ? link : null;
@@ -40,10 +40,10 @@ const SERIES = {
 };
 const manifest = {
   id: 'org.community.runningman.goplay.browser',
-  version: '2.1.0',
+  version: '2.2.0',
   name: 'Running Man HD | Provider Sources',
   description: 'Running Man episode guide, GoPlay browser fallback, optional OneTouchTV, automatic licensed episode-feed importer with HLS and subtitles, or addon bridge.',
-  types: ['series'], idPrefixes: ['rmhd:', 'tt2185037'],
+  types: ['series'], idPrefixes: ['rmhd:', 'tt2185037','tmdb:33238'],
   resources: ['catalog','meta','stream','subtitles'],
   catalogs: [{type:'series', id:'rmhd-catalog', name:'Running Man', extra:[{name:'search',isRequired:false}]}],
   behaviorHints: {configurable:false, configurationRequired:false}
@@ -83,8 +83,8 @@ function sampleStreams(origin) {
     behaviorHints:{notWebReady:true,filename:'BigBuckBunny.m3u8'}
   }];
 }
-function episodeVideo(e, legacy=false) {
-  const v = { id: legacy ? `rmhd:ep:${e.number}` : `${SERIES_ID}:1:${e.number}`, title:e.title, season:1, episode:e.number,
+function episodeVideo(e, series=SERIES_ID) {
+  const v = { id: videoId(series,e.number), title:e.title, season:1, episode:e.number,
     overview:e.description || `Running Man — Episode ${e.number}. Video links open in an external browser where supported.`};
   if (e.airDate) v.released = e.airDate + 'T00:00:00.000Z';
   if (e.thumbnail && isHttps(e.thumbnail)) v.thumbnail = e.thumbnail;
@@ -94,20 +94,14 @@ async function resolvedSources(n, origin) {
   const local=episodeSources(n,origin);
   const imported=loadLocalEpisodeFeed(n,origin);
   const remote=await loadRemoteSources(n,origin);
-  const all=[...local.streams,...imported.streams,...remote.onetouch.streams,...remote.feed.streams,...remote.bridge.streams];
-  const used=new Set();
-  const direct=all.filter(s=> {
-    if(!s.url || used.has(s.url)) return false;
-    used.add(s.url);return true;
+  return mergeSources(n,{
+    local, imported,
+    onetouch:remote.onetouch,
+    feed:remote.feed,
+    bridge:remote.bridge
   });
-  const subs=direct.flatMap(s=>s.subtitles||[]);
-  const seen=new Set();
-  return {streams:direct,subtitles:subs.filter(s=> {
-    const key=s.lang+'|'+s.url;
-    if(seen.has(key))return false;
-    seen.add(key); return true;
-  })};
 }
+
 async function videoStreams(n, origin) {
   const direct=(await resolvedSources(n,origin)).streams;
   const page=customWatch(n) || SERIES_URL;
@@ -209,17 +203,25 @@ async function handle(req,res) {
   if(pathname===`/meta/series/${SAMPLE_ID}.json`) {
     return reply(res,200,{meta:{...samplePreview(origin),videos:[sampleVideo()]}});
   }
-  if(pathname===`/meta/series/${SERIES_ID}.json` || pathname===`/meta/series/${LEGACY_SERIES_ID}.json`) {
+  if([SERIES_ID,TMDB_SERIES_ID,LEGACY_SERIES_ID].some(id => pathname===`/meta/series/${id}.json`)) {
     const episodes=await getEpisodes();
-    const legacy = pathname === `/meta/series/${LEGACY_SERIES_ID}.json`;
-    return reply(res,200,{meta:{...SERIES, id:legacy?LEGACY_SERIES_ID:SERIES_ID, poster:origin+'/poster.png', posterShape:'poster', videos:episodes.map(e=>episodeVideo(e,legacy))}});
+    const requestSeries = pathname.slice('/meta/series/'.length,-'.json'.length);
+    return reply(res,200,{meta:{...SERIES, id:requestSeries, poster:origin+'/poster.png', posterShape:'poster', videos:episodes.map(e=>episodeVideo(e,requestSeries))}});
   }
   if(pathname===`/stream/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{streams:sampleStreams(origin)});
-  const streamMatch=/^\/stream\/series\/(rmhd:ep:\d{1,4}|tt2185037:1:\d{1,4})\.json$/.exec(pathname);
-  if(streamMatch){const episodes=await getEpisodes();const n=epNumber(streamMatch[1]) ?? Number(streamMatch[1].split(':')[2]);return reply(res,200,{streams:n && n<=episodes.length?await videoStreams(n,origin):[]});}
+  const streamMatch=/^\/stream\/series\/([^/]+)\.json$/.exec(pathname);
+  if(streamMatch && episodeId(streamMatch[1])) {const episodes=await getEpisodes();const n=episodeId(streamMatch[1]);return reply(res,200,{streams:n<=episodes.length?await videoStreams(n,origin):[]});}
   if(pathname===`/subtitles/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{subtitles:sampleSubtitles(origin)});
-  const subtitleMatch=/^\/subtitles\/series\/(rmhd:ep:\d{1,4}|tt2185037:1:\d{1,4})\.json$/.exec(pathname);
-  if(subtitleMatch){const episodes=await getEpisodes();const n=epNumber(subtitleMatch[1]) ?? Number(subtitleMatch[1].split(':')[2]);return reply(res,200,{subtitles:n && n<=episodes.length?await subtitleTracks(n,origin):[]});}
+  const subtitleMatch=/^\/subtitles\/series\/([^/]+)\.json$/.exec(pathname);
+  if(subtitleMatch && episodeId(subtitleMatch[1])) {const episodes=await getEpisodes();const n=episodeId(subtitleMatch[1]);return reply(res,200,{subtitles:n<=episodes.length?await subtitleTracks(n,origin):[]});}
+  const diagnosticMatch=/^\/diagnostics\/episode\/(\d{1,4})\.json$/.exec(pathname);
+  if(diagnosticMatch) {
+    const episodes=await getEpisodes();
+    const n=Number(diagnosticMatch[1]);
+    if(n<1 || n>episodes.length)return reply(res,404,{error:'Episode not indexed'});
+    const result=await resolvedSources(n,origin);
+    return reply(res,200,diagnose(n,result,Boolean(customWatch(n))));
+  }
   if(pathname==='/player-test') return reply(res,200,layout(`<section class="hero"><p class="stats">IN-APP HLS + SRT CAPTIONS TEST</p><h1>Big Buck Bunny — sample video</h1><p>This is <strong>not</strong> a Running Man episode. Big Buck Bunny © 2008 Blender Foundation, licensed under CC BY 3.0.</p><p class="notice">In Nuvio: Discover → Running Man catalog → Player Test — Big Buck Bunny → Episode 1 → choose <strong>TEST ONLY • HLS + English captions</strong>. The MP4 test remains removed because it did not play on the tested device.</p><p>To test captions, open the player subtitle/CC menu and select the English track. Choose English (SRT test); diagnostic captions should repeat every 20 seconds during the first 10 minutes. If no captions render, verify the SRT URL in your phone browser and test a different player. These are <strong>demonstration captions, not official film dialogue</strong>. If captions do not appear, try Nuvio Settings → Player → Addon Subtitle Startup → All subtitles, then reopen the test (menu names can vary).</p><div class="buttons"><a class="btn alt" href="/">Back to Running Man</a><a class="btn alt" href="/sample-captions-v16.srt">Inspect SRT captions</a><a class="btn alt" href="/sample-captions.vtt">VTT fallback (browser only)</a><a class="btn alt" href="https://peach.blender.org/about/" target="_blank" rel="noopener noreferrer">License and attribution ↗</a></div></section>`, 'Nuvio HLS + Captions Test — Big Buck Bunny'),'text/html; charset=utf-8');
   const directEpisode=/^\/episode\/(\d{1,4})\/?$/.exec(pathname);
   if(directEpisode){const episodes=await getEpisodes();const n=Number(directEpisode[1]); if(n<1||n>episodes.length)return reply(res,404,layout('<h1>Episode not indexed</h1><p><a href="/">Go back</a></p>'),'text/html; charset=utf-8');return reply(res,200,episodePage(episodes,n,origin),'text/html; charset=utf-8');}
@@ -228,6 +230,6 @@ async function handle(req,res) {
 }
 function makeServer() {return http.createServer((req,res)=>handle(req,res).catch(err=>{console.error(err);if(!res.headersSent)reply(res,500,{error:'Server error'});else res.end();}));}
 if(require.main===module) {
- const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v2.0 running on http://localhost:${PORT}`));
+ const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v2.2 running on http://localhost:${PORT}`));
 }
-module.exports = { makeServer, manifest, videoStreams, episodeVideo, epNumber, isHttps, sampleStreams, sampleSubtitles, SAMPLE_ID, SAMPLE_VIDEO_ID, SERIES_ID, LEGACY_SERIES_ID };
+module.exports = { makeServer, manifest, videoStreams, episodeVideo, epNumber, isHttps, sampleStreams, sampleSubtitles, SAMPLE_ID, SAMPLE_VIDEO_ID, SERIES_ID, TMDB_SERIES_ID, LEGACY_SERIES_ID };
