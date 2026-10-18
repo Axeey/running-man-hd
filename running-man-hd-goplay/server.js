@@ -12,7 +12,6 @@ const SAMPLE_ID = 'rmhd:sample';
 const SAMPLE_VIDEO_ID = 'rmhd:sample:1';
 // Creative Commons Attribution 3.0: Blender Foundation (2008), Big Buck Bunny.
 // Independently hosted demo links are provided as-is; provider uptime may vary.
-const SAMPLE_MP4 = 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 const SAMPLE_HLS = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
 const SAMPLE = {
   id: SAMPLE_ID,
@@ -39,9 +38,9 @@ const SERIES = {
 };
 const manifest = {
   id: 'org.community.runningman.goplay.browser',
-  version: '1.4.0',
+  version: '1.5.0',
   name: 'Running Man HD | Watch Links',
-  description: 'Running Man episode guide with GoPlay browser links, plus a separate Creative Commons player-test video. No GoPlay videos are scraped or delivered.',
+  description: 'Running Man guide with GoPlay browser links and an independent open-licensed HLS + caption test. No GoPlay videos are scraped or delivered.',
   types: ['series'], idPrefixes: ['rmhd:'],
   resources: ['catalog','meta','stream','subtitles'],
   catalogs: [{type:'series', id:'rmhd-catalog', name:'Running Man', extra:[{name:'search',isRequired:false}]}],
@@ -53,13 +52,32 @@ function samplePreview(origin) {
 }
 function sampleVideo() {
   return {id:SAMPLE_VIDEO_ID, title:'Player Test (not Running Man)', season:1, episode:1,
-    released:'2008-04-10T00:00:00.000Z', overview:'Big Buck Bunny — sample video. Use MP4 or HLS to confirm Nuvio in-app video playback. © 2008 Blender Foundation (CC BY 3.0).'};
+    released:'2008-04-10T00:00:00.000Z', overview:'Big Buck Bunny — an open-licensed HLS playback and English demonstration-caption test. These captions are a test signal, not dialogue or official subtitles. © 2008 Blender Foundation (CC BY 3.0).'};
 }
-function sampleStreams() {
-  return [
-    {name:'TEST ONLY • MP4',description:'Big Buck Bunny sample • NOT Running Man • CC BY 3.0',url:SAMPLE_MP4,behaviorHints:{filename:'BigBuckBunny.mp4'}},
-    {name:'TEST ONLY • HLS',description:'Big Buck Bunny adaptive HLS • NOT Running Man • CC BY 3.0',url:SAMPLE_HLS,behaviorHints:{notWebReady:true,filename:'BigBuckBunny.m3u8'}}
-  ];
+// Captions are intentionally diagnostic markers, not subtitles from the movie.
+// Use this same-origin VTT to test Nuvio's external subtitles handling.
+const SAMPLE_VTT = `WEBVTT
+
+00:00:02.000 --> 00:00:07.000
+English caption test — not movie dialogue.
+
+00:00:10.000 --> 00:00:16.000
+If you can read this, the subtitle track is working.
+
+00:00:25.000 --> 00:00:31.000
+Running Man HD v1.5 · HLS player test.
+`;
+function sampleSubtitles(origin) {
+  return [{id:'rmhd-sample-en-v15',lang:'eng',url:origin+'/sample-captions.vtt'}];
+}
+function sampleStreams(origin) {
+  return [{
+    name:'TEST ONLY • HLS + English captions',
+    description:'Working HLS format • Big Buck Bunny • NOT Running Man • CC BY 3.0',
+    url:SAMPLE_HLS,
+    subtitles: sampleSubtitles(origin),
+    behaviorHints:{notWebReady:true,filename:'BigBuckBunny.m3u8'}
+  }];
 }
 function episodeVideo(e) {
   const v = { id:`rmhd:ep:${e.number}`, title:e.title, season:1, episode:e.number,
@@ -153,8 +171,9 @@ async function handle(req,res) {
     res.writeHead(200,{'Content-Type':'image/png','Content-Length':poster.length,'Cache-Control':'public, max-age=86400','Access-Control-Allow-Origin':'*'});
     return res.end(req.method==='HEAD' ? undefined : poster);
   }
-  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'external Running Man links + separately labeled CC-BY player test'});
+  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'external Running Man links + separately labeled HLS / VTT player test'});
   if(pathname==='/favicon.ico') return reply(res,204,'');
+  if(pathname==='/sample-captions.vtt') return reply(res,200,SAMPLE_VTT,'text/vtt; charset=utf-8');
   if(pathname==='/catalog/series/rmhd-catalog.json' || /^\/catalog\/series\/rmhd-catalog\/.+\.json$/.test(pathname)) {
     const query=url.searchParams.get('search') || (pathname.match(/search=([^/]+)\.json$/)?.[1] || '');
     const q=decodeURIComponent(query).trim().toLowerCase();
@@ -172,13 +191,13 @@ async function handle(req,res) {
     const episodes=await getEpisodes();
     return reply(res,200,{meta:{...SERIES, poster:origin+'/poster.png', posterShape:'poster', videos:episodes.map(episodeVideo)}});
   }
-  if(pathname===`/stream/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{streams:sampleStreams()});
+  if(pathname===`/stream/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{streams:sampleStreams(origin)});
   const streamMatch=/^\/stream\/series\/(rmhd:ep:\d{1,4})\.json$/.exec(pathname);
   if(streamMatch){const episodes=await getEpisodes();const n=epNumber(streamMatch[1]);return reply(res,200,{streams:n && n<=episodes.length?videoStreams(n):[]});}
-  if(pathname===`/subtitles/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{subtitles:[]});
+  if(pathname===`/subtitles/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{subtitles:sampleSubtitles(origin)});
   const subtitleMatch=/^\/subtitles\/series\/(rmhd:ep:\d{1,4})\.json$/.exec(pathname);
   if(subtitleMatch){const episodes=await getEpisodes();const n=epNumber(subtitleMatch[1]);return reply(res,200,{subtitles:n && n<=episodes.length?subtitleTracks(n):[]});}
-  if(pathname==='/player-test') return reply(res,200,layout(`<section class="hero"><p class="stats">IN-APP PLAYBACK TEST</p><h1>Big Buck Bunny — Sample video</h1><p>This is <strong>not</strong> a Running Man episode. Big Buck Bunny © 2008 Blender Foundation, licensed under CC BY 3.0.</p><p class="notice">In Nuvio: Discover → Running Man catalog → Player Test — Big Buck Bunny → Episode 1 → choose TEST ONLY • MP4 first. If that fails, try TEST ONLY • HLS.</p><div class="buttons"><a class="btn alt" href="/">Back to Running Man</a><a class="btn alt" href="https://peach.blender.org/about/" target="_blank" rel="noopener noreferrer">License and attribution ↗</a></div></section><div class="card"><h2>Browser fallback</h2><p>This browser player uses the public MP4 sample to check whether your phone can reach the video host; it does not verify Nuvio integration.</p><video style="width:100%;max-height:480px;background:#000;border-radius:12px" controls playsinline preload="none"><source src="${SAMPLE_MP4}" type="video/mp4">Video isn't supported in this browser.</video></div>`, 'Nuvio Player Test — Big Buck Bunny'),'text/html; charset=utf-8');
+  if(pathname==='/player-test') return reply(res,200,layout(`<section class="hero"><p class="stats">IN-APP HLS + CAPTIONS TEST</p><h1>Big Buck Bunny — sample video</h1><p>This is <strong>not</strong> a Running Man episode. Big Buck Bunny © 2008 Blender Foundation, licensed under CC BY 3.0.</p><p class="notice">In Nuvio: Discover → Running Man catalog → Player Test — Big Buck Bunny → Episode 1 → choose <strong>TEST ONLY • HLS + English captions</strong>. The MP4 test was removed because it did not play on the tested device.</p><p>To test captions, open the player subtitle/CC menu and select the English track. Look for short diagnostic captions beginning a few seconds into the video. These are <strong>demonstration captions, not official film dialogue</strong>. If captions do not appear, try Nuvio Settings → Player → Addon Subtitle Startup → All subtitles, then reopen the test (menu names can vary).</p><div class="buttons"><a class="btn alt" href="/">Back to Running Man</a><a class="btn alt" href="/sample-captions.vtt">Inspect English test captions</a><a class="btn alt" href="https://peach.blender.org/about/" target="_blank" rel="noopener noreferrer">License and attribution ↗</a></div></section>`, 'Nuvio HLS + Captions Test — Big Buck Bunny'),'text/html; charset=utf-8');
   const directEpisode=/^\/episode\/(\d{1,4})\/?$/.exec(pathname);
   if(directEpisode){const episodes=await getEpisodes();const n=Number(directEpisode[1]); if(n<1||n>episodes.length)return reply(res,404,layout('<h1>Episode not indexed</h1><p><a href="/">Go back</a></p>'),'text/html; charset=utf-8');return reply(res,200,episodePage(episodes,n),'text/html; charset=utf-8');}
   if(pathname==='/' || pathname==='/browse'){const episodes=await getEpisodes();return reply(res,200,homepage(episodes,url),'text/html; charset=utf-8');}
@@ -186,6 +205,6 @@ async function handle(req,res) {
 }
 function makeServer() {return http.createServer((req,res)=>handle(req,res).catch(err=>{console.error(err);if(!res.headersSent)reply(res,500,{error:'Server error'});else res.end();}));}
 if(require.main===module) {
- const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v1.4 running on http://localhost:${PORT}`));
+ const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v1.5 running on http://localhost:${PORT}`));
 }
-module.exports = { makeServer, manifest, videoStreams, episodeVideo, epNumber, isHttps, sampleStreams, SAMPLE_ID, SAMPLE_VIDEO_ID };
+module.exports = { makeServer, manifest, videoStreams, episodeVideo, epNumber, isHttps, sampleStreams, sampleSubtitles, SAMPLE_ID, SAMPLE_VIDEO_ID };
