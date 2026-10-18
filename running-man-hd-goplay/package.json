@@ -1,8 +1,8 @@
 {
   "name": "running-man-hd-goplay",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "Running Man episode guide with optional OneTouchTV provider, HLS feed and addon bridge, GoPlay fallback, and HLS/SRT",
+  "description": "Running Man episode guide with optional OneTouchTV provider, automatic structured licensed HLS episode feed and addon bridge, GoPlay fallback, and HLS/SRT",
   "license": "MIT",
   "engines": {
     "node": ">=20"
