@@ -1,9 +1,12 @@
 'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
 // Opt-in adapters for providers that explicitly allow third-party playback.
 // Reads Stremio-compatible stream JSON or licensed JSON episode feeds.
 // Does not extract streaming websites, forward credentials, download video, or bypass DRM.
 const { normalize } = require('./sources');
 const onetouch = require('./onetouchtv');
+const { feedRows } = require('./episode-import');
 const MAX_BYTES = 512 * 1024;
 const FETCH_TIMEOUT_MS = 4000;
 const CACHE_MS = 90000;
@@ -61,11 +64,21 @@ function cached(cache,key,load) {
   promise.catch(()=>{if(cache.get(key)?.promise===promise)cache.delete(key);});
   return promise;
 }
-function feedRows(document,episode) {
-  if (!document || typeof document !== 'object' || Array.isArray(document)) return [];
-  const episodes = document.episodes && typeof document.episodes==='object' ? document.episodes : document;
-  const row = episodes[String(episode)];
-  return Array.isArray(row) ? row : Array.isArray(row?.streams) ? row.streams : [];
+/** Local provider feed; edit episode-feed.json in your GitHub repo. */
+function loadLocalEpisodeFeed(episode, origin, overrideDocument) {
+  try {
+    let doc = overrideDocument;
+    if (doc === undefined) {
+      const filename = path.join(__dirname, 'episode-feed.json');
+      if (fs.statSync(filename).size > MAX_BYTES) throw new Error('Local episode feed is too large');
+      doc = JSON.parse(fs.readFileSync(filename, 'utf8'));
+    }
+    const rows = feedRows(doc, episode).map(row=>({ ...row, name:`Local feed: ${String(row.name||'HLS').slice(0,45)}` }));
+    return normalize(episode,rows,origin);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') console.warn('[local episode feed]', String(err?.message||err));
+    return {streams:[],subtitles:[]};
+  }
 }
 function normalizeBridgeResponse(episode, payload, origin) {
   if (!payload || typeof payload!=='object' || !Array.isArray(payload.streams)) return {streams:[], subtitles:[]};
@@ -83,7 +96,7 @@ function providerStatus() {
   return {independentFeed:cfg.feedUrl?'configured':'not configured',
     addonBridge:cfg.bridgeManifest?'configured':'not configured',
     ...onetouch.status(),
-    note:'Provider URLs are set through Render environment variables. Only explicitly permitted HLS streams may be supplied.'};
+    note:'Authorized HTTPS HLS episode feeds support episodes maps, episode arrays and Loklok-shaped episodeVo/definitionList/subtitlingList structures. Schema support does NOT provide access to Loklok/GoPlay.'};
 }
 async function loadRemoteSources(episode, origin, options={}) {
   const cfg = options.config || config();
@@ -125,4 +138,4 @@ async function loadRemoteSources(episode, origin, options={}) {
   }
   return {feed,bridge,onetouch:onetouchData};
 }
-module.exports={publicHttps,config,fetchJson,feedRows,normalizeBridgeResponse,providerStatus,loadRemoteSources};
+module.exports={publicHttps,config,fetchJson,feedRows,loadLocalEpisodeFeed,normalizeBridgeResponse,providerStatus,loadRemoteSources};
