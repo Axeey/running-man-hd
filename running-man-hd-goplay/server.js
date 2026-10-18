@@ -40,9 +40,9 @@ const SERIES = {
 };
 const manifest = {
   id: 'org.community.runningman.goplay.browser',
-  version: '1.9.0',
-  name: 'Running Man HD | Dual Sources',
-  description: 'Running Man episode guide, GoPlay browser links and opt-in licensed HLS feed or Stremio addon bridge. No scraped or protected videos included.',
+  version: '2.0.0',
+  name: 'Running Man HD | Provider Sources',
+  description: 'Running Man episode guide, GoPlay browser fallback, optional OneTouchTV integration, HLS feed or addon bridge.',
   types: ['series'], idPrefixes: ['rmhd:', 'tt2185037'],
   resources: ['catalog','meta','stream','subtitles'],
   catalogs: [{type:'series', id:'rmhd-catalog', name:'Running Man', extra:[{name:'search',isRequired:false}]}],
@@ -93,7 +93,7 @@ function episodeVideo(e, legacy=false) {
 async function resolvedSources(n, origin) {
   const local=episodeSources(n,origin);
   const remote=await loadRemoteSources(n,origin);
-  const all=[...local.streams,...remote.feed.streams,...remote.bridge.streams];
+  const all=[...local.streams,...remote.onetouch.streams,...remote.feed.streams,...remote.bridge.streams];
   const used=new Set();
   const direct=all.filter(s=> {
     if(!s.url || used.has(s.url)) return false;
@@ -160,7 +160,7 @@ function episodePage(episodes,n,origin) {
   const previous=n>1?`<a class="btn alt" href="/episode/${n-1}">← Episode ${n-1}</a>`:'';
   const next=n<episodes.length?`<a class="btn alt" href="/episode/${n+1}">Episode ${n+1} →</a>`:'';
   const note=directLink?'This is an episode-specific GoPlay page configured by you.':'This is the Running Man Classics series page, <strong>not an Episode '+n+' video link</strong>. Select Episode '+n+' on the site.';
-  return layout(`<section class="hero"><p class="stats">RUNNING MAN · EPISODE ${n}</p><h1>${html(e.title)}</h1><p class="muted">${html(e.airDate||'Air date not listed')}</p><p>${html(e.description||'Episode details and the watch site are available below.')}</p><div class="buttons">${previous}${next}</div></section><div class="card"><h2>Watch in browser</h2><p class="notice">${note} Quality and subtitles are controlled by the destination website; external playback is not guaranteed.</p><div class="buttons"><a class="btn" href="${html(target)}" rel="noopener noreferrer" target="_blank">Open GoPlay website ↗</a><a class="btn alt" href="/">Browse episodes</a></div></div><div class="card"><h2>In-app playback status</h2><p>${configured ? `${configured} authorized HLS source(s) configured. Open this episode in Nuvio to choose them.` : `No local direct HLS source is configured. Optional remote sources may be available if you have configured an authorized feed or bridge.`}</p><p><a href="/sources/status.json">View source integration status</a></p></div><div class="card"><h2>About Stremio &amp; Nuvio</h2><p>Stremio may show a website-opening entry. Some versions of Nuvio do not honor browser-only stream links. If playback fails in Nuvio, open this companion page in your phone's browser.</p></div>`, `Running Man Episode ${n}`);
+  return layout(`<section class="hero"><p class="stats">RUNNING MAN · EPISODE ${n}</p><h1>${html(e.title)}</h1><p class="muted">${html(e.airDate||'Air date not listed')}</p><p>${html(e.description||'Episode details and the watch site are available below.')}</p><div class="buttons">${previous}${next}</div></section><div class="card"><h2>Watch in browser</h2><p class="notice">${note} Quality and subtitles are controlled by the destination website; external playback is not guaranteed.</p><div class="buttons"><a class="btn" href="${html(target)}" rel="noopener noreferrer" target="_blank">Open GoPlay website ↗</a><a class="btn alt" href="/">Browse episodes</a></div></div><div class="card"><h2>In-app playback status</h2><p>${configured ? `${configured} authorized HLS source(s) configured. Open this episode in Nuvio to choose them.` : `No local direct HLS source is configured. Optional provider sources may be available if enabled.`}</p><p><a href="/sources/status.json">View source integration status</a></p></div><div class="card"><h2>About Stremio &amp; Nuvio</h2><p>Stremio may show a website-opening entry. Some versions of Nuvio do not honor browser-only stream links. If playback fails in Nuvio, open this companion page in your phone's browser.</p></div>`, `Running Man Episode ${n}`);
 }
 async function handle(req,res) {
   if(req.method==='OPTIONS') return reply(res,204,'');
@@ -190,7 +190,7 @@ async function handle(req,res) {
     res.writeHead(200,{'Content-Type':'image/png','Content-Length':poster.length,'Cache-Control':'public, max-age=86400','Access-Control-Allow-Origin':'*'});
     return res.end(req.method==='HEAD' ? undefined : poster);
   }
-  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'GoPlay browser guide + authorized HLS adapter + proven independent HLS/SRT sample'});
+  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'GoPlay guide + experimental provider adapter + independent feed + bridge + HLS/SRT sample'});
   if(pathname==='/sources/status.json') return reply(res,200,{...sourceStatus(),remote:providerStatus()});
   if(pathname==='/favicon.ico') return reply(res,204,'');
   if(pathname==='/sample-captions.vtt') return reply(res,200,SAMPLE_VTT,'text/vtt; charset=utf-8');
@@ -227,6 +227,6 @@ async function handle(req,res) {
 }
 function makeServer() {return http.createServer((req,res)=>handle(req,res).catch(err=>{console.error(err);if(!res.headersSent)reply(res,500,{error:'Server error'});else res.end();}));}
 if(require.main===module) {
- const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v1.9 running on http://localhost:${PORT}`));
+ const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v2.0 running on http://localhost:${PORT}`));
 }
 module.exports = { makeServer, manifest, videoStreams, episodeVideo, epNumber, isHttps, sampleStreams, sampleSubtitles, SAMPLE_ID, SAMPLE_VIDEO_ID, SERIES_ID, LEGACY_SERIES_ID };
