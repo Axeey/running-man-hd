@@ -1,0 +1,12 @@
+{
+  "name": "running-man-hd-goplay",
+  "version": "1.3.0",
+  "private": true,
+  "description": "Stremio/Nuvio Running Man catalog and browser watch links (no stream ripping)",
+  "license": "MIT",
+  "engines": {"node": ">=20"},
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
