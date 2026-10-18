@@ -38,9 +38,9 @@ const SERIES = {
 };
 const manifest = {
   id: 'org.community.runningman.goplay.browser',
-  version: '1.5.0',
+  version: '1.6.0',
   name: 'Running Man HD | Watch Links',
-  description: 'Running Man guide with GoPlay browser links and an independent open-licensed HLS + caption test. No GoPlay videos are scraped or delivered.',
+  description: 'Running Man guide with GoPlay browser links and an independent open-licensed HLS + recurring SRT caption test. No GoPlay videos are scraped or delivered.',
   types: ['series'], idPrefixes: ['rmhd:'],
   resources: ['catalog','meta','stream','subtitles'],
   catalogs: [{type:'series', id:'rmhd-catalog', name:'Running Man', extra:[{name:'search',isRequired:false}]}],
@@ -54,21 +54,23 @@ function sampleVideo() {
   return {id:SAMPLE_VIDEO_ID, title:'Player Test (not Running Man)', season:1, episode:1,
     released:'2008-04-10T00:00:00.000Z', overview:'Big Buck Bunny — an open-licensed HLS playback and English demonstration-caption test. These captions are a test signal, not dialogue or official subtitles. © 2008 Blender Foundation (CC BY 3.0).'};
 }
-// Captions are intentionally diagnostic markers, not subtitles from the movie.
-// Use this same-origin VTT to test Nuvio's external subtitles handling.
-const SAMPLE_VTT = `WEBVTT
-
-00:00:02.000 --> 00:00:07.000
-English caption test — not movie dialogue.
-
-00:00:10.000 --> 00:00:16.000
-If you can read this, the subtitle track is working.
-
-00:00:25.000 --> 00:00:31.000
-Running Man HD v1.5 · HLS player test.
-`;
+// Diagnostic captions, not movie dialogue. SRT is the default because some Nuvio
+// clients list WebVTT addon subtitles but fail to render them. We show short test
+// markers throughout the movie, not just in the first 31 seconds.
+function cueTime(seconds, srt=false) {
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), sec = seconds % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}${srt ? ',000' : '.000'}`;
+}
+const TEST_CUES = Array.from({length:30}, (_,i) => {
+  const start = 2 + i*20;
+  return {start, end:start+9, text: i%2===0
+    ? 'Running Man HD - ENGLISH SUBTITLE TEST (not movie dialogue)'
+    : 'If you can read this, Nuvio is rendering external subtitles.'};
+});
+const SAMPLE_SRT = TEST_CUES.map((c,i) => `${i+1}\r\n${cueTime(c.start,true)} --> ${cueTime(c.end,true)}\r\n${c.text}\r\n`).join('\r\n');
+const SAMPLE_VTT = 'WEBVTT\n\n' + TEST_CUES.map(c => `${cueTime(c.start)} --> ${cueTime(c.end)}\n${c.text}\n`).join('\n');
 function sampleSubtitles(origin) {
-  return [{id:'rmhd-sample-en-v15',lang:'eng',url:origin+'/sample-captions.vtt'}];
+  return [{id:'rmhd-sample-en-srt-v16',lang:'eng',name:'English (SRT test)',url:origin+'/sample-captions-v16.srt'}];
 }
 function sampleStreams(origin) {
   return [{
@@ -171,9 +173,10 @@ async function handle(req,res) {
     res.writeHead(200,{'Content-Type':'image/png','Content-Length':poster.length,'Cache-Control':'public, max-age=86400','Access-Control-Allow-Origin':'*'});
     return res.end(req.method==='HEAD' ? undefined : poster);
   }
-  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'external Running Man links + separately labeled HLS / VTT player test'});
+  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'external Running Man links + separately labeled HLS / SRT player test'});
   if(pathname==='/favicon.ico') return reply(res,204,'');
   if(pathname==='/sample-captions.vtt') return reply(res,200,SAMPLE_VTT,'text/vtt; charset=utf-8');
+  if(pathname==='/sample-captions-v16.srt') return reply(res,200,SAMPLE_SRT,'application/x-subrip; charset=utf-8');
   if(pathname==='/catalog/series/rmhd-catalog.json' || /^\/catalog\/series\/rmhd-catalog\/.+\.json$/.test(pathname)) {
     const query=url.searchParams.get('search') || (pathname.match(/search=([^/]+)\.json$/)?.[1] || '');
     const q=decodeURIComponent(query).trim().toLowerCase();
@@ -197,7 +200,7 @@ async function handle(req,res) {
   if(pathname===`/subtitles/series/${SAMPLE_VIDEO_ID}.json`) return reply(res,200,{subtitles:sampleSubtitles(origin)});
   const subtitleMatch=/^\/subtitles\/series\/(rmhd:ep:\d{1,4})\.json$/.exec(pathname);
   if(subtitleMatch){const episodes=await getEpisodes();const n=epNumber(subtitleMatch[1]);return reply(res,200,{subtitles:n && n<=episodes.length?subtitleTracks(n):[]});}
-  if(pathname==='/player-test') return reply(res,200,layout(`<section class="hero"><p class="stats">IN-APP HLS + CAPTIONS TEST</p><h1>Big Buck Bunny — sample video</h1><p>This is <strong>not</strong> a Running Man episode. Big Buck Bunny © 2008 Blender Foundation, licensed under CC BY 3.0.</p><p class="notice">In Nuvio: Discover → Running Man catalog → Player Test — Big Buck Bunny → Episode 1 → choose <strong>TEST ONLY • HLS + English captions</strong>. The MP4 test was removed because it did not play on the tested device.</p><p>To test captions, open the player subtitle/CC menu and select the English track. Look for short diagnostic captions beginning a few seconds into the video. These are <strong>demonstration captions, not official film dialogue</strong>. If captions do not appear, try Nuvio Settings → Player → Addon Subtitle Startup → All subtitles, then reopen the test (menu names can vary).</p><div class="buttons"><a class="btn alt" href="/">Back to Running Man</a><a class="btn alt" href="/sample-captions.vtt">Inspect English test captions</a><a class="btn alt" href="https://peach.blender.org/about/" target="_blank" rel="noopener noreferrer">License and attribution ↗</a></div></section>`, 'Nuvio HLS + Captions Test — Big Buck Bunny'),'text/html; charset=utf-8');
+  if(pathname==='/player-test') return reply(res,200,layout(`<section class="hero"><p class="stats">IN-APP HLS + SRT CAPTIONS TEST</p><h1>Big Buck Bunny — sample video</h1><p>This is <strong>not</strong> a Running Man episode. Big Buck Bunny © 2008 Blender Foundation, licensed under CC BY 3.0.</p><p class="notice">In Nuvio: Discover → Running Man catalog → Player Test — Big Buck Bunny → Episode 1 → choose <strong>TEST ONLY • HLS + English captions</strong>. The MP4 test remains removed because it did not play on the tested device.</p><p>To test captions, open the player subtitle/CC menu and select the English track. Choose English (SRT test); diagnostic captions should repeat every 20 seconds during the first 10 minutes. If no captions render, verify the SRT URL in your phone browser and test a different player. These are <strong>demonstration captions, not official film dialogue</strong>. If captions do not appear, try Nuvio Settings → Player → Addon Subtitle Startup → All subtitles, then reopen the test (menu names can vary).</p><div class="buttons"><a class="btn alt" href="/">Back to Running Man</a><a class="btn alt" href="/sample-captions-v16.srt">Inspect SRT captions</a><a class="btn alt" href="/sample-captions.vtt">VTT fallback (browser only)</a><a class="btn alt" href="https://peach.blender.org/about/" target="_blank" rel="noopener noreferrer">License and attribution ↗</a></div></section>`, 'Nuvio HLS + Captions Test — Big Buck Bunny'),'text/html; charset=utf-8');
   const directEpisode=/^\/episode\/(\d{1,4})\/?$/.exec(pathname);
   if(directEpisode){const episodes=await getEpisodes();const n=Number(directEpisode[1]); if(n<1||n>episodes.length)return reply(res,404,layout('<h1>Episode not indexed</h1><p><a href="/">Go back</a></p>'),'text/html; charset=utf-8');return reply(res,200,episodePage(episodes,n),'text/html; charset=utf-8');}
   if(pathname==='/' || pathname==='/browse'){const episodes=await getEpisodes();return reply(res,200,homepage(episodes,url),'text/html; charset=utf-8');}
@@ -205,6 +208,6 @@ async function handle(req,res) {
 }
 function makeServer() {return http.createServer((req,res)=>handle(req,res).catch(err=>{console.error(err);if(!res.headersSent)reply(res,500,{error:'Server error'});else res.end();}));}
 if(require.main===module) {
- const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v1.5 running on http://localhost:${PORT}`));
+ const server = makeServer(); server.listen(PORT,'0.0.0.0',()=>console.log(`Running Man HD v1.6 running on http://localhost:${PORT}`));
 }
 module.exports = { makeServer, manifest, videoStreams, episodeVideo, epNumber, isHttps, sampleStreams, sampleSubtitles, SAMPLE_ID, SAMPLE_VIDEO_ID };
