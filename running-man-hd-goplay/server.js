@@ -24,7 +24,7 @@ const SERIES = {
 };
 const manifest = {
   id: 'org.community.runningman.goplay.browser',
-  version: '1.3.0',
+  version: '1.3.1',
   name: 'Running Man HD | Watch Links',
   description: 'Episode guide and optional GoPlay browser-watch link. This does NOT scrape or deliver GoPlay video streams. Nuvio may not support externalUrl; use the included mobile web page.',
   types: ['series'], idPrefixes: ['rmhd:'],
@@ -32,7 +32,7 @@ const manifest = {
   catalogs: [{type:'series', id:'rmhd-catalog', name:'Running Man', extra:[{name:'search',isRequired:false}]}],
   behaviorHints: {configurable:false, configurationRequired:false}
 };
-function seriesPreview() {return {id:SERIES.id, type:SERIES.type, name:SERIES.name, description:SERIES.description, genres:SERIES.genres, releaseInfo:SERIES.releaseInfo};}
+function seriesPreview(origin) {return {id:SERIES.id, type:SERIES.type, name:SERIES.name, poster:origin+'/poster.png', posterShape:'poster', description:SERIES.description, genres:SERIES.genres, releaseInfo:SERIES.releaseInfo};}
 function episodeVideo(e) {
   const v = { id:`rmhd:ep:${e.number}`, title:e.title, season:1, episode:e.number,
     overview:e.description || `Running Man — Episode ${e.number}. Video links open in an external browser where supported.`};
@@ -112,17 +112,23 @@ async function handle(req,res) {
   if(!['GET','HEAD'].includes(req.method)) return reply(res,405,{error:'Method not allowed'});
   const url = new URL(req.url || '/', 'http://localhost');
   const pathname=decodeURIComponent(url.pathname);
+  const origin = `${(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).toString().split(',')[0]}://${req.headers.host || 'localhost'}`;
   if(pathname==='/manifest.json') return reply(res,200,manifest);
+  if(pathname==='/poster.png') {
+    const poster=fs.readFileSync(path.join(__dirname,'poster.png'));
+    res.writeHead(200,{'Content-Type':'image/png','Content-Length':poster.length,'Cache-Control':'public, max-age=86400','Access-Control-Allow-Origin':'*'});
+    return res.end(req.method==='HEAD' ? undefined : poster);
+  }
   if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'external watch links'});
   if(pathname==='/favicon.ico') return reply(res,204,'');
   if(pathname==='/catalog/series/rmhd-catalog.json' || /^\/catalog\/series\/rmhd-catalog\/.+\.json$/.test(pathname)) {
     const query=url.searchParams.get('search') || (pathname.match(/search=([^/]+)\.json$/)?.[1] || '');
     const matching=!query || ('running man variety 런닝맨').includes(decodeURIComponent(query).toLowerCase());
-    return reply(res,200,{metas:matching?[seriesPreview()]:[]});
+    return reply(res,200,{metas:matching?[seriesPreview(origin)]:[]});
   }
   if(pathname===`/meta/series/${SERIES_ID}.json`) {
     const episodes=await getEpisodes();
-    return reply(res,200,{meta:{...SERIES, videos:episodes.map(episodeVideo)}});
+    return reply(res,200,{meta:{...SERIES, poster:origin+'/poster.png', posterShape:'poster', videos:episodes.map(episodeVideo)}});
   }
   const streamMatch=/^\/stream\/series\/(rmhd:ep:\d{1,4})\.json$/.exec(pathname);
   if(streamMatch){const episodes=await getEpisodes();const n=epNumber(streamMatch[1]);return reply(res,200,{streams:n && n<=episodes.length?videoStreams(n):[]});}
