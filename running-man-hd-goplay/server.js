@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config.json');
 const {episodeSources, status:sourceStatus} = require('./sources');
-const {loadRemoteSources,providerStatus} = require('./providers');
+const {loadRemoteSources,providerStatus,loadLocalEpisodeFeed} = require('./providers');
 const episodeLinks = require('./episode-watch-links.json');
 const { getEpisodes } = require('./metadata');
 const PORT = Number(process.env.PORT) || 7000;
@@ -40,9 +40,9 @@ const SERIES = {
 };
 const manifest = {
   id: 'org.community.runningman.goplay.browser',
-  version: '2.0.0',
+  version: '2.1.0',
   name: 'Running Man HD | Provider Sources',
-  description: 'Running Man episode guide, GoPlay browser fallback, optional OneTouchTV integration, HLS feed or addon bridge.',
+  description: 'Running Man episode guide, GoPlay browser fallback, optional OneTouchTV, automatic licensed episode-feed importer with HLS and subtitles, or addon bridge.',
   types: ['series'], idPrefixes: ['rmhd:', 'tt2185037'],
   resources: ['catalog','meta','stream','subtitles'],
   catalogs: [{type:'series', id:'rmhd-catalog', name:'Running Man', extra:[{name:'search',isRequired:false}]}],
@@ -92,8 +92,9 @@ function episodeVideo(e, legacy=false) {
 }
 async function resolvedSources(n, origin) {
   const local=episodeSources(n,origin);
+  const imported=loadLocalEpisodeFeed(n,origin);
   const remote=await loadRemoteSources(n,origin);
-  const all=[...local.streams,...remote.onetouch.streams,...remote.feed.streams,...remote.bridge.streams];
+  const all=[...local.streams,...imported.streams,...remote.onetouch.streams,...remote.feed.streams,...remote.bridge.streams];
   const used=new Set();
   const direct=all.filter(s=> {
     if(!s.url || used.has(s.url)) return false;
@@ -190,7 +191,7 @@ async function handle(req,res) {
     res.writeHead(200,{'Content-Type':'image/png','Content-Length':poster.length,'Cache-Control':'public, max-age=86400','Access-Control-Allow-Origin':'*'});
     return res.end(req.method==='HEAD' ? undefined : poster);
   }
-  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'GoPlay guide + experimental provider adapter + independent feed + bridge + HLS/SRT sample'});
+  if(pathname==='/health') return reply(res,200,{status:'ok',version:manifest.version,mode:'GoPlay guide + experimental provider adapter + structured authorized episode importer + bridge + HLS/SRT sample'});
   if(pathname==='/sources/status.json') return reply(res,200,{...sourceStatus(),remote:providerStatus()});
   if(pathname==='/favicon.ico') return reply(res,204,'');
   if(pathname==='/sample-captions.vtt') return reply(res,200,SAMPLE_VTT,'text/vtt; charset=utf-8');
