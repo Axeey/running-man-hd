@@ -1,8 +1,8 @@
 {
   "name": "running-man-hd-goplay",
-  "version": "1.6.0",
+  "version": "1.8.0",
   "private": true,
-  "description": "Running Man guide and GoPlay browser links; separate CC BY 3.0 HLS and repeated English SRT demo-caption test",
+  "description": "Running Man episode guide with interoperable IMDb IDs, GoPlay browser fallback, and opt-in authorized HLS/SRT",
   "license": "MIT",
   "engines": {
     "node": ">=20"
