@@ -3,6 +3,7 @@
 // Reads Stremio-compatible stream JSON or licensed JSON episode feeds.
 // Does not extract streaming websites, forward credentials, download video, or bypass DRM.
 const { normalize } = require('./sources');
+const onetouch = require('./onetouchtv');
 const MAX_BYTES = 512 * 1024;
 const FETCH_TIMEOUT_MS = 4000;
 const CACHE_MS = 90000;
@@ -81,13 +82,19 @@ function providerStatus() {
   const cfg=config();
   return {independentFeed:cfg.feedUrl?'configured':'not configured',
     addonBridge:cfg.bridgeManifest?'configured':'not configured',
+    ...onetouch.status(),
     note:'Provider URLs are set through Render environment variables. Only explicitly permitted HLS streams may be supplied.'};
 }
 async function loadRemoteSources(episode, origin, options={}) {
   const cfg = options.config || config();
   const requester = options.fetchJson || fetchJson;
   const empty = {streams:[],subtitles:[]};
-  let feed = empty, bridge = empty;
+  let feed = empty, bridge = empty, onetouchData = empty;
+  if(options.onetouchEnabled ?? onetouch.enabled()) {
+    try {
+      onetouchData=await onetouch.getEpisode(episode,origin,{getApi:options.onetouchGetApi});
+    } catch(err) {console.warn('[onetouchtv]',String(err?.message||err));}
+  }
   if (cfg.feedUrl) {
     try {
       const data=await cached(feedCache,cfg.feedUrl,()=>requester(cfg.feedUrl));
@@ -106,9 +113,16 @@ async function loadRemoteSources(episode, origin, options={}) {
       if(canStream) {
         const payload=await cached(bridgeCache,route,()=>requester(route));
         bridge=normalizeBridgeResponse(episode,payload,origin);
+        // Running Man has a verified TMDB identifier as well as an IMDb ID.
+        // A cooperating addon may index only one of those IDs.
+        if (!bridge.streams.length) {
+          const tmdbRoute=new URL(`stream/series/tmdb:33238:1:${episode}.json`,base).href;
+          const other=await cached(bridgeCache,tmdbRoute,()=>requester(tmdbRoute));
+          bridge=normalizeBridgeResponse(episode,other,origin);
+        }
       }
     } catch (err) { console.warn('[addon bridge]', String(err?.message||err)); }
   }
-  return {feed,bridge};
+  return {feed,bridge,onetouch:onetouchData};
 }
 module.exports={publicHttps,config,fetchJson,feedRows,normalizeBridgeResponse,providerStatus,loadRemoteSources};
