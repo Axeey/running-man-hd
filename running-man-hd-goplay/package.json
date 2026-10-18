@@ -1,8 +1,8 @@
 {
   "name": "running-man-hd-goplay",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
-  "description": "Running Man guide and GoPlay browser links; separate CC BY 3.0 HLS and English demo-caption test",
+  "description": "Running Man guide and GoPlay browser links; separate CC BY 3.0 HLS and repeated English SRT demo-caption test",
   "license": "MIT",
   "engines": {
     "node": ">=20"
