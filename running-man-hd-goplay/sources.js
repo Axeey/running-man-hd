@@ -9,6 +9,7 @@ const CAPTIONS_DIR = path.join(__dirname, 'captions');
 const BAD_HOSTS = new Set(['goplay.su', 'www.goplay.su', 'myrm.tv', 'www.myrm.tv']);
 const ALLOWED_QUALITY = new Set(['auto','360p','480p','720p','1080p','1440p','2160p']);
 const LANG_CODES = /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/;
+const LANG_ALIAS = Object.freeze({'en':'eng','en-us':'eng','en-gb':'eng','ko':'kor','zh':'zho','ms':'msa','id':'ind'});
 
 function httpsUrl(value) {
   if (typeof value !== 'string') return null;
@@ -37,7 +38,8 @@ function captionsFor(row, n, origin, streamIndex) {
     if (!sub || typeof sub !== 'object') return [];
     const url = cleanCaption(sub.url, origin);
     if (!url) return [];
-    const lang = String(sub.lang || 'eng').toLowerCase();
+    const requestedLang = String(sub.lang || 'eng').toLowerCase().replace('_','-');
+    const lang = LANG_ALIAS[requestedLang] || requestedLang;
     if (!LANG_CODES.test(lang)) return [];
     return [{ id:`rmhd-${n}-cc-${streamIndex}-${index}`, lang,
       name:String(sub.name || 'English').slice(0,45), url }];
